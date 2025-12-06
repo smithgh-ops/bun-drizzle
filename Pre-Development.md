@@ -563,15 +563,23 @@ export async function createUserHandler(req: Request): Promise<Response> {
 }
 
 // ✅ XSS Prevention
-export function sanitizeHtml(html: string): string {
-  // Use a library like DOMPurify for production
-  return html
+// NOTE: This is a basic example for demonstration. 
+// In production, use a dedicated sanitization library like DOMPurify or sanitize-html
+export function basicHtmlEscape(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#x27;')
     .replace(/\//g, '&#x2F;');
 }
+
+// For production, use a proper library:
+// import DOMPurify from 'isomorphic-dompurify';
+// export function sanitizeHtml(html: string): string {
+//   return DOMPurify.sanitize(html, { ALLOWED_TAGS: ['p', 'b', 'i', 'em', 'strong'] });
+// }
 ```
 
 #### A04:2021 - Insecure Design
@@ -653,8 +661,9 @@ export function handleError(error: Error, isDevelopment: boolean): Response {
 }
 
 // ✅ Dependency Scanning
-// Use: bun audit (coming soon) or npm audit
-// Regularly update dependencies
+// Regularly update dependencies and scan for vulnerabilities
+// Use tools like: Snyk, npm audit, or GitHub Dependabot
+// Set up automated dependency updates with renovate or dependabot
 ```
 
 #### A06:2021 - Vulnerable and Outdated Components
@@ -900,12 +909,23 @@ const ALLOWED_DOMAINS = [
   'cdn.example.com'
 ];
 
-const BLOCKED_IPS = [
-  '127.0.0.1',
-  'localhost',
-  '0.0.0.0',
-  '::1'
+// Block all private and localhost IP ranges
+const BLOCKED_IP_PATTERNS = [
+  /^127\./,           // 127.0.0.0/8 - localhost
+  /^10\./,            // 10.0.0.0/8 - private
+  /^172\.(1[6-9]|2[0-9]|3[0-1])\./,  // 172.16.0.0/12 - private
+  /^192\.168\./,      // 192.168.0.0/16 - private
+  /^169\.254\./,      // 169.254.0.0/16 - link-local
+  /^0\./,             // 0.0.0.0/8 - current network
+  /^localhost$/i,     // localhost
+  /^::1$/,            // IPv6 localhost
+  /^fc00:/,           // IPv6 private
+  /^fe80:/            // IPv6 link-local
 ];
+
+function isBlockedIP(hostname: string): boolean {
+  return BLOCKED_IP_PATTERNS.some(pattern => pattern.test(hostname));
+}
 
 export async function fetchExternalResource(url: string): Promise<Response> {
   const parsedUrl = new URL(url);
@@ -920,9 +940,9 @@ export async function fetchExternalResource(url: string): Promise<Response> {
     throw new Error('Domain not allowed');
   }
   
-  // Check for blocked IPs
-  if (BLOCKED_IPS.includes(parsedUrl.hostname)) {
-    throw new Error('IP address blocked');
+  // Check for blocked IPs and private networks
+  if (isBlockedIP(parsedUrl.hostname)) {
+    throw new Error('IP address or private network blocked');
   }
   
   // Make request with timeout
@@ -1443,12 +1463,21 @@ export async function uploadFile(
     throw new Error('File type not allowed');
   }
   
-  // Validate file content (magic bytes)
+  // Validate file content (magic bytes) to prevent MIME type spoofing
+  // Use a library like 'file-type' for production
   const buffer = await file.arrayBuffer();
-  const actualType = await detectFileType(buffer);
+  const uint8Array = new Uint8Array(buffer);
   
-  if (actualType !== file.type) {
-    throw new Error('File type mismatch');
+  // Basic magic byte validation (for demonstration)
+  // For production, use: import { fileTypeFromBuffer } from 'file-type';
+  const isValidImage = (
+    (uint8Array[0] === 0xFF && uint8Array[1] === 0xD8) || // JPEG
+    (uint8Array[0] === 0x89 && uint8Array[1] === 0x50) || // PNG
+    (uint8Array[0] === 0x47 && uint8Array[1] === 0x49)    // GIF
+  );
+  
+  if (!isValidImage && file.type.startsWith('image/')) {
+    throw new Error('File content does not match declared MIME type');
   }
   
   // Generate safe filename
