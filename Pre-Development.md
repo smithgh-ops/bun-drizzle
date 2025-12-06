@@ -578,7 +578,10 @@ export function basicHtmlEscape(text: string): string {
 // For production, use a proper library:
 // import DOMPurify from 'isomorphic-dompurify';
 // export function sanitizeHtml(html: string): string {
-//   return DOMPurify.sanitize(html, { ALLOWED_TAGS: ['p', 'b', 'i', 'em', 'strong'] });
+//   return DOMPurify.sanitize(html, { 
+//     ALLOWED_TAGS: ['p', 'b', 'i', 'em', 'strong', 'a', 'ul', 'ol', 'li'],
+//     ALLOWED_ATTR: ['href', 'class', 'id']  // Prevent attribute-based XSS
+//   });
 // }
 ```
 
@@ -917,10 +920,14 @@ const BLOCKED_IP_PATTERNS = [
   /^192\.168\./,      // 192.168.0.0/16 - private
   /^169\.254\./,      // 169.254.0.0/16 - link-local
   /^0\./,             // 0.0.0.0/8 - current network
+  /^224\./,           // 224.0.0.0/4 - multicast
+  /^240\./,           // 240.0.0.0/4 - reserved
+  /^255\.255\.255\.255$/, // broadcast
   /^localhost$/i,     // localhost
   /^::1$/,            // IPv6 localhost
-  /^fc00:/,           // IPv6 private
-  /^fe80:/            // IPv6 link-local
+  /^fc00:/,           // IPv6 private (fc00::/7)
+  /^fe80:/,           // IPv6 link-local
+  /^ff00:/            // IPv6 multicast
 ];
 
 function isBlockedIP(hostname: string): boolean {
@@ -944,6 +951,11 @@ export async function fetchExternalResource(url: string): Promise<Response> {
   if (isBlockedIP(parsedUrl.hostname)) {
     throw new Error('IP address or private network blocked');
   }
+  
+  // Additional security: Resolve DNS and check if it points to blocked IP
+  // This prevents attacks where a domain resolves to private IPs
+  // Note: Requires DNS resolution capability (not shown in this example)
+  // In production, use a library that supports DNS resolution validation
   
   // Make request with timeout
   const controller = new AbortController();
@@ -1470,15 +1482,24 @@ export async function uploadFile(
   
   // Basic magic byte validation (for demonstration)
   // For production, use: import { fileTypeFromBuffer } from 'file-type';
-  const isValidImage = (
-    (uint8Array[0] === 0xFF && uint8Array[1] === 0xD8) || // JPEG
-    (uint8Array[0] === 0x89 && uint8Array[1] === 0x50) || // PNG
-    (uint8Array[0] === 0x47 && uint8Array[1] === 0x49)    // GIF
-  );
+  // These are SIMPLIFIED examples - use proper libraries in production
+  const isValidJPEG = uint8Array[0] === 0xFF && uint8Array[1] === 0xD8 && uint8Array[2] === 0xFF;
+  const isValidPNG = uint8Array[0] === 0x89 && uint8Array[1] === 0x50 && 
+                     uint8Array[2] === 0x4E && uint8Array[3] === 0x47;
+  const isValidGIF = uint8Array[0] === 0x47 && uint8Array[1] === 0x49 && 
+                     uint8Array[2] === 0x46 && uint8Array[3] === 0x38;
+  
+  const isValidImage = isValidJPEG || isValidPNG || isValidGIF;
   
   if (!isValidImage && file.type.startsWith('image/')) {
     throw new Error('File content does not match declared MIME type');
   }
+  
+  // Production recommendation:
+  // const detectedType = await fileTypeFromBuffer(uint8Array);
+  // if (detectedType?.mime !== file.type) {
+  //   throw new Error('File type mismatch');
+  // }
   
   // Generate safe filename
   const ext = file.name.split('.').pop();
